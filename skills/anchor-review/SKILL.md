@@ -1,108 +1,141 @@
 ---
 name: anchor-review
-description: Blind mock peer review of a manuscript for *ACL venues (ACL, EMNLP, NAACL via ARR), calibrated by mixing the manuscript with same-field "anchor" papers whose outcome is known (main conference, Findings, arXiv-only/not accepted). Reviewers follow the official ARR form and guidelines; the report says where the manuscript falls among the anchors and whether it is in the accepted range. Use when the user asks for a mock review, a blind review, an ARR-style assessment, or "would this get into ACL/EMNLP/NAACL/Findings".
+description: Blind mock peer review of a manuscript for *ACL venues (ACL, EMNLP, NAACL via ARR), calibrated by mixing the manuscript with same-field "anchor" papers whose outcome is known (main conference, Findings, arXiv-only/not accepted). The first use for a venue and field builds and saves a calibrated profile; later reviews reuse it. Users who skip setup get the built-in default criteria. Use when the user asks for a mock review, a blind review, an ARR-style assessment, or "would this get into ACL/EMNLP/NAACL/Findings".
 ---
 
 # anchor-review
 
 The idea: absolute LLM review scores are unreliable, but their *ordering* is informative. So the target manuscript is
 reviewed blind together with papers whose fate is known. The result is reported as a position relative to those anchors.
-In the same run, the anchors measure how well the reviewers separate the classes.
 
-## What it can and cannot tell
-Calibrated with v2 of the reviewer prompt on 24 anchor papers in RAG, compression and multi-hop QA (8 per class). Validated on 12 held-out anchors that were not used for tuning.
-- **It can tell accepted papers (main or Findings) from arXiv-only papers.**
-  - AUC 0.84 on the tuning set.
-  - AUC 0.89 on the held-out set.
-- **It cannot tell main from Findings.**
-  - AUC 0.30.
-  - The main/Findings split in real ARR depends on SAC quotas and reviewer noise (α≈0.3) more than on the text.
-- Always report the target as "accepted range or not" plus a percentile against each anchor class. Never as a confident main/Findings verdict.
+## Choose the mode first
 
-## Presets (defaults)
-- **`presets/acl-arr_rag.md`**: *ACL via ARR × RAG, compression and multi-hop QA. This is the default.
-  - Calibrated and validated: 36 anchors, held-out AUC 0.89.
-  - Includes the score bands that tell how to read a target's mean.
-- **`presets/domestic-kr.md`**: Korean domestic conferences (KSC, HCLT, ASK).
-  - Prompt only; not calibrated.
-- If the user names no venue or field, use the default and say so. Users can switch the venue, the field, or both. A changed field needs new anchors (step 1). A changed venue needs new criteria (step 0).
+Run `python scripts/profiles.py list`. Profiles are saved in `~/.claude/anchor-review/profiles/`.
 
-## How many papers
-| Purpose | Anchors | Reviews |
-|---|---|---|
-| Minimum | 5 MAIN + 5 FINDINGS + 5 ARXIV-ONLY + target(s) | 3 per paper |
-| Recommended (used in the default preset) | 8 + 8 + 8 + target(s) | 3 per paper, 4–5 papers per reviewer |
-| New venue or prompt version | add a held-out set of 4 + 4 + 4 | 3 per paper |
+| Situation | Mode |
+|---|---|
+| A profile exists for the user's venue and field | **B. Review with the saved profile** (normal case) |
+| No profile, and the user agrees to the one-time setup | **A. Setup**, then B |
+| No profile, and the user does not want setup ("just review it", "use the default") | **C. Default** |
 
-- With 25 papers, 5 per batch and 3 venues, one run is 15 reviewer subagents. A held-out check of 12 papers is 9 more.
-- Fewer than 5 per class makes the AUC too noisy to judge reliability.
+- If there is no profile, ask once: explain that setup collects about 24 anchors and runs about 15 reviewer subagents one time. After that, each review needs only about 6 reviewers.
+- If the user declines, use C and say that the result is uncalibrated for their field.
+- Never run setup without the user's agreement.
 
-## Steps
+## A. Setup (once per venue × field)
 
-### 0. Venue criteria
-- **For *ACL venues through ARR,** use `reference/arr_criteria.md` and `reference/reviewer_prompt.md` as they are.
-- **For another venue** (NeurIPS, ICLR, CVPR, a journal, a domestic conference):
-  - Research the venue's official review form, score definitions, reviewer guidelines and call for papers first.
-  - Write a matching criteria file with sources.
-  - Adapt the scales and the valid/invalid reasons in a copy of the reviewer prompt.
-  - Keep the structure: the significance step, severity calibration, and the hiding rules.
-  - Treat the copy as an unvalidated version until it passes the anchor check in step 5.
+**0. Criteria.**
+- For *ACL venues through ARR, use `reference/arr_criteria.md` and `reference/reviewer_prompt.md` as they are.
+- For another venue:
+  - research its official review form, score definitions, reviewer guidelines and CFP
+  - write a criteria file with sources
+  - adapt a copy of the reviewer prompt: its scales and its valid/invalid reasons
+  - keep the significance step, severity calibration and hiding rules
 
-### 1. Anchors
-- Build the anchor set for the target's own topic by following `reference/build_anchors.md`. The repository ships no paper list.
-  - If you keep anchor keys from earlier runs locally, for example in `data/`, you may reuse them for the same field.
-  - Never redistribute the anchor texts.
-- A new set should have:
-  - same topic as the target
-  - 8 MAIN, 8 FINDINGS and 8 ARXIV-ONLY papers
-  - ARXIV-ONLY status verified through arXiv metadata, Semantic Scholar, OpenAlex, Anthology title match and a web search
-- Keep the key confidential. Reviewers must never see it.
+**1. Anchors.** Follow `reference/build_anchors.md`:
+- 8 MAIN, 8 FINDINGS and 8 ARXIV-ONLY papers in the user's topic
+- ARXIV-ONLY status verified (arXiv metadata, Semantic Scholar, OpenAlex, Anthology title match, web search)
+- a confidential `key.md`
 
-### 2. Blind copies
-- Convert every paper, the target included, to the same Markdown form:
+Optionally also build a held-out 4+4+4 set.
+
+**2. Blind copies.** Use `scripts/extract.py`, `anon.py`, `clean.py` and `strip.py` (see "Blind copies" below).
+
+**3. Calibration run.**
+- Run `python scripts/assign.py <anchor_subs> <run> <prompt> --per 5 --seed 1`.
+- Launch one reviewer subagent per task (see "Reviewers" below).
+- Run `python scripts/aggregate.py <run>/reviews key.md --target NONE`.
+- **The reliability AUC (accepted vs arXiv-only) must be ≥ 0.75.** If it is lower, look for leaked cues before changing the prompt. A changed prompt is a new version and needs the held-out set.
+
+**4. Save.**
+```
+python scripts/profiles.py save <name> --venue "<venue>" --field "<field>" --subs <anchor_subs> --key key.md --reviews <run>/reviews [--prompt <prompt>]
+```
+- `<name>` is short, e.g. `acl-arr__rag`.
+- The profile stores the anchors, key, prompt, calibration reviews and the per-class score distribution.
+- It is local only. Never publish it, because it holds other people's paper texts.
+
+Then continue with B for the user's manuscript.
+
+## B. Review with a saved profile
+
+1. **Blind copy of the target** (see "Blind copies"). Give it a fresh 4-letter ID that is not in the profile key.
+2. **Sample anchors and the target into a new folder:**
+   ```
+   python scripts/profiles.py sample <name> <run>/subs --targets paper_ABCD.md --per-class 3 --seed <n>
+   ```
+   - This makes 9 anchors plus the target.
+   - Anchors stay in the batch so that reviewers judge the target in context. They also give a fresh reliability check.
+3. **Assign reviewers:** `python scripts/assign.py <run>/subs <run> ~/.claude/anchor-review/profiles/<name>/reviewer_prompt.md --per 5 --seed <n>`. With 10 papers this is 6 reviewers.
+4. **Run the reviewers** (see "Reviewers").
+5. **Aggregate:**
+   ```
+   python scripts/aggregate.py <run>/reviews ~/.claude/anchor-review/profiles/<name>/key.md --target ABCD --profile ~/.claude/anchor-review/profiles/<name>/profile.json
+   ```
+   - Report the target's position **against the profile** (all calibrated anchors). This is the main result.
+   - Also report the position within this run, as a consistency check.
+
+## C. Default (no setup)
+
+Use the built-in criteria and score bands of `presets/acl-arr_rag.md`. They were calibrated for ARR × RAG/compression/multi-hop QA.
+1. Make the blind copy of the target.
+2. Put it alone in a folder and run `assign.py` with `reference/reviewer_prompt.md` and `--per 1`. This gives 3 reviewers.
+3. Read the mean Overall with the preset's bands:
+   - ≥ 3.0: accepted range
+   - 2.5–2.99: borderline
+   - < 2.5: likely not accepted as is
+4. Say clearly in the report:
+   - no anchors were used
+   - the bands come from another field's calibration
+   - setup (mode A) would give a calibrated position
+
+## Blind copies (all modes)
+- Every paper must have the same Markdown form:
   - `# Paper XXXX` / `## Title` / title / `## Abstract` / body
-  - appendix kept, references dropped
-  - Use `scripts/extract.py`, `scripts/anon.py` and `scripts/clean.py`.
-- Remove authors, affiliations, venue headers, acknowledgments, arXiv stamps, identifying URLs and self-citations that reveal the authors.
-- Run `scripts/strip.py` on all files. It removes Limitations, Ethics and AI-assistant sections, which otherwise leak the class. Also delete any AI-writing-assistant paragraph left inside an appendix.
-- **Target paper.** If the user has a named method or prior paper that could identify them, rename it consistently, for example their method → a neutral name, and "Author et al. (year)" → "prior work (year)". Replace placeholder markers with their current values. Do not change any claim.
-- Give every file a fresh random 4-letter ID. Put all files in one neutral folder, e.g. `arr2027/subs/`. The folder name must not reveal the purpose.
+  - the appendix is kept and the references are dropped
+- Remove authors, affiliations, venue headers, acknowledgments, arXiv stamps and identifying URLs.
+- `strip.py` removes the Limitations, Ethics and AI-use sections, which leak the class. Remove by hand any leftovers it flags.
+- **Target paper.** Rename an identifying method name or self-citation consistently, e.g. "Author et al. (year)" → "prior work (year)". Replace placeholder markers with current values. Never change a claim.
+- Use a neutral folder name (e.g. `arr2027/subs/`). It must not reveal the purpose.
 
-### 3. Reviewers
-- Run `python scripts/assign.py <subs> <run_dir> reference/reviewer_prompt.md --per 5 --seed <n>`.
-  - One pass per venue (ACL, EMNLP, NAACL), so each paper gets 3 independent reviews.
-- Launch one subagent per task file. Brief each one only with: "Your reviewing assignment is in `<task file>`. Read that file first and follow it exactly. Do not open any other file except the submissions it lists. When done, reply with only the final summary table."
+## Reviewers (all modes)
+- Launch one subagent per task file with only this brief: "Your reviewing assignment is in `<task file>`. Read that file first and follow it exactly. Do not open any other file except the submissions it lists. When done, reply with only the final summary table."
 - **Do not tell reviewers:**
   - the purpose of the review
   - that a target paper is included
   - that some papers are published
-  - the scores of earlier runs
-- Reviewers may not search the web. If a reviewer breaks the rules (opens other files, searches, guesses provenance), discard that review and rerun the task.
+  - any earlier scores
+- No web search. If a reviewer breaks a rule, discard that review and rerun the task.
+- Optional area chair: `reference/ac_prompt.md` (fill its placeholders by hand). Aggregate with `--ac <dir>`.
 
-### 4. Area chair (optional)
-`reference/ac_prompt.md` turns three reviews into a meta-review and drops arguments that ARR lists as invalid. Give it the papers and the review files.
+## What it can and cannot tell
+- The default profile (ARR × RAG, 36 anchors) separates **accepted vs arXiv-only**:
+  - AUC 0.84 on the tuning set
+  - AUC 0.89 on the held-out set
+  - AUC 0.86 on all 36
+- It **cannot** separate main from Findings: AUC 0.30–0.63. That split depends on area-chair quotas and reviewer noise (α≈0.3).
+- Report "accepted range or not" and the percentile against each anchor class. Never give a confident main/Findings verdict.
+- Write the report in the user's language. The reviews are in Korean by default; change the language line in the prompt if needed.
 
-### 5. Aggregate
-- Run `python scripts/aggregate.py <run_dir>/reviews <key.md> --target <ID>[,<ID>]`.
-- Report:
-  - the class means and AUCs for this run. If AUC accepted-vs-arXiv < 0.75, say that this run is not reliable.
-  - each target's mean Overall and Soundness
-  - the share of each anchor class scoring below the target
-  - the recurring decisive reasons quoted from the reviews
-- For the user's own language, translate the summary; the reviews themselves are written in Korean by default. Change the language line in `reference/reviewer_prompt.md` if needed.
+## How many papers
+| Purpose | Anchors | Reviewer subagents (≈) |
+|---|---|---|
+| Setup, minimum | 5 + 5 + 5 | 9 |
+| Setup, recommended | 8 + 8 + 8 | 15 |
+| Setup with held-out validation | + 4 + 4 + 4 | +9 |
+| Each later review (mode B) | 3 + 3 + 3 sampled, plus the target | 6 |
+| Default (mode C) | none | 3 |
 
 ## Files
-- `reference/reviewer_prompt.md`: v2 reviewer prompt, frozen. It contains:
-  - the ARR scales
-  - a separate significance step
-  - severity calibration
-  - valid (R/M) and invalid (H) reasons
+- `reference/reviewer_prompt.md`: v2 reviewer prompt (frozen). It has the ARR scales, a significance step, severity calibration, and the valid and invalid reasons.
 - `reference/ac_prompt.md`: meta-review prompt.
-- `reference/arr_criteria.md`: sources for every rule (ARR form, reviewer and AC guidelines, CFPs, acceptance rates, empirical studies).
-- `reference/build_anchors.md`: how to build and verify an anchor set.
-- `scripts/`: `extract.py`, `anon.py`, `clean.py`, `strip.py`, `assign.py`, `aggregate.py`.
-- `data/` (optional, local only): your own anchor keys from earlier runs.
+- `reference/arr_criteria.md`: sources for every rule.
+- `reference/build_anchors.md`: how to build and verify anchors.
+- `presets/acl-arr_rag.md`: default criteria and score bands (mode C), plus the calibration record.
+- `presets/domestic-kr.md`: Korean domestic venues (prompt only, uncalibrated).
+- `scripts/`: `extract.py`, `anon.py`, `clean.py`, `strip.py`, `assign.py`, `aggregate.py`, `profiles.py`. See `scripts/README.md`.
+- `~/.claude/anchor-review/profiles/<name>/`: saved profiles (local only).
 
 ## Changing the prompt
 - Do not edit `reviewer_prompt.md` to make one manuscript look better.
-- Any change is a new version. Re-measure it on the anchor set and on a held-out anchor set before using it.
+- Any change is a new version. Re-run setup steps 3–4 for it, and validate it on a held-out set.

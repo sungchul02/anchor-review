@@ -19,6 +19,7 @@ paper.pdf ──extract.py──▶ paper.txt ──anon.py (+cfg.json)──▶
 | `strip.py` | folder of `.md` | new folder | removes Limitations/Ethics/AI-use sections and flags leftovers |
 | `assign.py` | `subs/` + reviewer prompt | `tasks/`, `reviews/`, `plan.json` | one pass per venue, so 3 reviews per paper |
 | `aggregate.py` | `reviews/` + anchor key | printed report | parses only the last summary table of each review |
+| `profiles.py` | calibration run | `~/.claude/anchor-review/profiles/<name>/` | `save` once per venue × field; `sample` anchors + target for later reviews; `list` |
 
 The scripts use only the standard library, except `extract.py`, which needs PyMuPDF.
 None of them uses the network or executes the files it reads.

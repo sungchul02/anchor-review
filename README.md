@@ -35,6 +35,16 @@ It **can** tell whether a paper looks like it belongs in the accepted range. It 
 4. **Reviewers.** Three independent reviewer subagents per paper (ACL, EMNLP, NAACL). They follow the ARR scales, run a separate significance step, and grade flaws by severity. They are not told the purpose, that your paper is included, or that some papers are published.
 5. **Report.** Gives your mean score, its percentile against each anchor class, the reliability AUC of the run, and the recurring decisive reasons.
 
+## Three modes
+
+| Mode | When | Cost |
+|---|---|---|
+| **Setup** (once per venue × field) | First use. Claude collects about 24 anchors in your field, runs a calibration review, and saves a local *profile* if the reliability AUC is ≥ 0.75 | about 15 reviewer subagents, once |
+| **Review with profile** | Every later review. Your paper is mixed with 9 anchors sampled from the profile and placed against all calibrated anchors | about 6 reviewer subagents |
+| **Default** | You skip setup. Three reviewers score your paper alone; the result is read with the built-in ARR × RAG score bands | 3 reviewer subagents, uncalibrated for your field |
+
+Profiles are stored in `~/.claude/anchor-review/profiles/` and never leave your machine, because they contain other people's papers.
+
 ## Install
 
 ```text

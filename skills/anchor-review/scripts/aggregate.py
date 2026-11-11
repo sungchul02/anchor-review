@@ -10,6 +10,8 @@ Inputs
 - key.md: the confidential anchor key. Rows look like "| ABCD | MAIN | ..." (classes MAIN, FINDINGS, ARXIV-ONLY).
 - --target: IDs of the paper(s) being evaluated (not in the key).
 - --ac: optional folder of meta-reviews whose last table has a "메타" (meta score) column.
+- --profile: optional profile.json saved by profiles.py. The target is then also placed against the
+  profile's full calibrated anchor distribution, which is steadier than the few anchors sampled into this run.
 
 How to read the output
 - "AUC accepted vs arXiv-only" is the reliability check for this run: the probability that a random
@@ -18,6 +20,7 @@ How to read the output
 - "share below" for a target is the fraction of anchors of each class that scored lower (ties count half).
 """
 import argparse
+import json
 import pathlib
 import re
 import statistics as st
@@ -162,12 +165,28 @@ def report(name, scores, cls, targets):
             print(f"  target {t}: no scores found")
 
 
+def report_against_profile(path, scores, targets):
+    """Place each target against the anchor scores stored in a saved profile."""
+    info = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+    print(f"== against profile {info['name']} ({info['anchors']} anchors, reliability AUC {info['reliability_auc']})")
+    if not info.get("reliable"):
+        print("  WARNING: this profile was not reliable at calibration time")
+    for t in targets:
+        if t not in scores:
+            continue
+        s = scores[t]
+        below = {c: round(sum((x < s) + 0.5 * (x == s) for x in d["scores"]) / d["n"], 2)
+                 for c, d in info["per_class"].items()}
+        print(f"  target {t}: score {s}, share of each anchor class below it: {below}")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("reviews")
     ap.add_argument("key")
     ap.add_argument("--target", required=True, help="comma-separated target paper IDs")
     ap.add_argument("--ac", help="folder with meta-reviews (optional)")
+    ap.add_argument("--profile", help="profile.json from profiles.py (optional)")
     args = ap.parse_args()
 
     cls = read_key(args.key)
@@ -182,6 +201,8 @@ def main():
         meta = {p: s for p, s in read_meta(args.ac, known).items() if s is not None}
         report("AC meta score", meta, cls, targets)
 
+    if args.profile:
+        report_against_profile(args.profile, mean_overall, targets)
     print("  reviews per paper:", sorted({len(v) for v in overall.values()}))
     print()
     for p in sorted(mean_overall, key=lambda p: -mean_overall[p]):
