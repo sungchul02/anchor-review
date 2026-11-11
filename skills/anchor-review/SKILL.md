@@ -72,8 +72,9 @@ Then continue with B for the user's manuscript.
    ```
    python scripts/aggregate.py <run>/reviews ~/.claude/anchor-review/profiles/<name>/key.md --target ABCD --profile ~/.claude/anchor-review/profiles/<name>/profile.json
    ```
-   - Report the target's position **against the profile** (all calibrated anchors). This is the main result.
+   - Report the target's rank and position **against the profile** (all calibrated anchors). This is the main result, e.g. "rank 7–14 of 37".
    - Also report the position within this run, as a consistency check.
+   - **Always show the ranking table** that aggregate.py prints at the end. It has the columns 순위, ID, 구분, 평균 Overall, 심사자별 점수, Soundness and 결정 이유, with one line per reviewer. Put the target's row first in your summary, then the full table.
 
 ## C. Default (no setup)
 

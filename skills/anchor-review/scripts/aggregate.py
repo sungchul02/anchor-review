@@ -24,6 +24,7 @@ import json
 import pathlib
 import re
 import statistics as st
+import sys
 from itertools import combinations
 
 CLASSES = ("MAIN", "FINDINGS", "ARXIV-ONLY")
@@ -87,7 +88,7 @@ def column(row, name):
 
 def read_reviews(folder, known_ids):
     """{paper_id: [overall, ...]}, {paper_id: [soundness, ...]} over all review files."""
-    overall, soundness = {}, {}
+    overall, soundness, reasons = {}, {}, {}
     for f in sorted(pathlib.Path(folder).glob("*.md")):
         rows = last_table(f.read_text(encoding="utf-8"), ("soundness", "overall"), known_ids)
         if not rows:
@@ -97,7 +98,10 @@ def read_reviews(folder, known_ids):
                 value = first_number(column(row, col))
                 if value is not None:
                     store.setdefault(pid, []).append(value)
-    return overall, soundness
+            reason = column(row, "이유") or column(row, "reason")
+            if reason:
+                reasons.setdefault(pid, []).append(f"[{f.stem}] {reason}")
+    return overall, soundness, reasons
 
 
 def read_meta(folder, known_ids):
@@ -166,18 +170,34 @@ def report(name, scores, cls, targets):
 
 
 def report_against_profile(path, scores, targets):
-    """Place each target against the anchor scores stored in a saved profile."""
+    """Place each target against the anchor scores stored in a saved profile, including its rank."""
     info = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
     print(f"== against profile {info['name']} ({info['anchors']} anchors, reliability AUC {info['reliability_auc']})")
     if not info.get("reliable"):
         print("  WARNING: this profile was not reliable at calibration time")
+    pool = [x for d in info["per_class"].values() for x in d["scores"]]
     for t in targets:
         if t not in scores:
             continue
         s = scores[t]
         below = {c: round(sum((x < s) + 0.5 * (x == s) for x in d["scores"]) / d["n"], 2)
                  for c, d in info["per_class"].items()}
-        print(f"  target {t}: score {s}, share of each anchor class below it: {below}")
+        higher, tied = sum(x > s for x in pool), sum(x == s for x in pool)
+        rank = f"{higher + 1}" if not tied else f"{higher + 1}-{higher + tied + 1} (tied with {tied})"
+        print(f"  target {t}: score {s}, rank {rank} of {len(pool) + 1}, share of each anchor class below it: {below}")
+
+
+def ranking_table(mean_overall, overall, soundness, reasons, cls):
+    """Markdown table: rank, ID, class, mean Overall, each reviewer's Overall, Soundness, decisive reasons."""
+    order = sorted(mean_overall, key=lambda p: -mean_overall[p])
+    lines = ["| 순위 | ID | 구분 | 평균 Overall | 심사자별 | Soundness | 결정 이유 |", "|---|---|---|---|---|---|---|"]
+    for p in order:
+        rank = 1 + sum(mean_overall[q] > mean_overall[p] for q in order)  # ties share the best rank
+        label = "★ 대상 원고" if cls.get(p) == TARGET else cls.get(p, "?")
+        sound = round(st.mean(soundness[p]), 2) if soundness.get(p) else "-"
+        why = " / ".join(reasons.get(p, [])).replace("|", "/")
+        lines.append(f"| {rank} | {p} | {label} | {mean_overall[p]:.2f} | {overall[p]} | {sound} | {why} |")
+    return "\n".join(lines)
 
 
 def main():
@@ -188,13 +208,14 @@ def main():
     ap.add_argument("--ac", help="folder with meta-reviews (optional)")
     ap.add_argument("--profile", help="profile.json from profiles.py (optional)")
     args = ap.parse_args()
+    sys.stdout.reconfigure(encoding="utf-8")  # Korean reasons on Windows consoles
 
     cls = read_key(args.key)
     targets = args.target.split(",")
     cls.update({t: TARGET for t in targets})
     known = set(cls)
 
-    overall, soundness = read_reviews(args.reviews, known)
+    overall, soundness, reasons = read_reviews(args.reviews, known)
     mean_overall = {p: round(st.mean(v), 3) for p, v in overall.items()}
     report("reviewer mean Overall", mean_overall, cls, targets)
     if args.ac:
@@ -205,9 +226,7 @@ def main():
         report_against_profile(args.profile, mean_overall, targets)
     print("  reviews per paper:", sorted({len(v) for v in overall.values()}))
     print()
-    for p in sorted(mean_overall, key=lambda p: -mean_overall[p]):
-        sound = round(st.mean(soundness[p]), 2) if soundness.get(p) else None
-        print(f"{p}  {cls.get(p, '?'):<10}  overall={overall[p]}  mean={mean_overall[p]}  soundness={sound}")
+    print(ranking_table(mean_overall, overall, soundness, reasons, cls))
 
 
 if __name__ == "__main__":
