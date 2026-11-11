@@ -1,6 +1,6 @@
 {
   "name": "anchor-review",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Blind mock peer review for *ACL venues (ARR), calibrated by mixing your manuscript with same-field papers whose outcome is known (main, Findings, arXiv-only).",
   "author": { "name": "sungchul02" },
   "homepage": "https://github.com/sungchul02/anchor-review",

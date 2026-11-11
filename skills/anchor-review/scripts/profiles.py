@@ -17,7 +17,8 @@ Usage:
     python profiles.py list
 
     # 3) for a new review: copy a sample of anchors plus the target(s) into a fresh submissions folder
-    python profiles.py sample <name> <run_subs_dir> --targets paper_ABCD.md[,paper_EFGH.md] [--per-class 3] [--seed 1]
+    python profiles.py sample <name> <run_subs_dir> --targets paper_ABCD.md[,paper_EFGH.md] [--mix "MAIN=3,FINDINGS=2,COLING=2,ARXIV-ONLY=2"] [--seed 1]
+    # default bundle: 9 anchors + the target = 10 papers, which every tier reviewer reads in full
 
 Then run assign.py on <run_subs_dir> and aggregate.py with the profile's key.md (see SKILL.md).
 """
@@ -42,9 +43,9 @@ def save(args):
     if dest.exists() and not args.overwrite:
         sys.exit(f"profile {args.name} exists; pass --overwrite to replace it")
     cls = aggregate.read_key(args.key)
-    overall, _ = aggregate.read_reviews(args.reviews, set(cls))
+    overall, _, _, by_reviewer = aggregate.read_reviews(args.reviews, set(cls))
     means = {p: st.mean(v) for p, v in overall.items()}
-    reliability = aggregate.auc(means, cls, ("MAIN", "FINDINGS"), ("ARXIV-ONLY",))
+    reliability = aggregate.auc(means, cls, aggregate.ACCEPTED, ("ARXIV-ONLY",))
     if reliability is None or reliability < 0.75:
         print(f"WARNING: reliability AUC {reliability} < 0.75; the profile will be marked unreliable")
 
@@ -64,9 +65,12 @@ def save(args):
         v = sorted(round(s, 3) for p, s in means.items() if cls.get(p) == c)
         if v:
             per_class[c] = dict(n=len(v), mean=round(st.mean(v), 3), median=round(st.median(v), 3), scores=v)
+    per_reviewer = {name: dict(auc=aggregate.auc(s, cls, aggregate.ACCEPTED, ("ARXIV-ONLY",)),
+                               class_means=aggregate.class_means(s, cls))
+                    for name, s in sorted(by_reviewer.items())}
     info = dict(name=args.name, venue=args.venue, field=args.field, created=time.strftime("%Y-%m-%d"),
                 anchors=len(cls), reliability_auc=reliability, reliable=bool(reliability and reliability >= 0.75),
-                per_class=per_class)
+                per_class=per_class, per_reviewer=per_reviewer)
     (dest / "profile.json").write_text(json.dumps(info, indent=1, ensure_ascii=False), encoding="utf-8")
     print(f"saved profile {args.name} at {dest} (anchors {len(cls)}, reliability AUC {reliability})")
 
@@ -89,10 +93,19 @@ def sample(args):
     rng = random.Random(args.seed)
     out = pathlib.Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+    available = {c: sorted(p for p, k in cls.items() if k == c and (prof / "subs" / f"paper_{p}.md").exists())
+                 for c in aggregate.CLASSES}
+    if args.mix:
+        mix = {c: int(n) for c, n in (kv.split("=") for kv in args.mix.split(","))}
+    else:  # default bundle of 9 anchors: 3 MAIN, 2 FINDINGS, 2 COLING, 2 ARXIV-ONLY (3/3/3 without COLING anchors)
+        mix = ({"MAIN": 3, "FINDINGS": 2, "COLING": 2, "ARXIV-ONLY": 2} if available.get("COLING")
+               else {"MAIN": 3, "FINDINGS": 3, "ARXIV-ONLY": 3})
     chosen = []
-    for c in aggregate.CLASSES:
-        ids = sorted(p for p, k in cls.items() if k == c and (prof / "subs" / f"paper_{p}.md").exists())
-        chosen += rng.sample(ids, min(args.per_class, len(ids)))
+    for c, n in mix.items():
+        ids = available.get(c, [])
+        if len(ids) < n:
+            print(f"WARNING: only {len(ids)} {c} anchors available, wanted {n}")
+        chosen += rng.sample(ids, min(n, len(ids)))
     for pid in chosen:
         shutil.copy(prof / "subs" / f"paper_{pid}.md", out / f"paper_{pid}.md")
     for t in args.targets.split(","):
@@ -115,7 +128,8 @@ def main():
     sub.add_parser("list").set_defaults(func=list_profiles)
     m = sub.add_parser("sample")
     m.add_argument("name"); m.add_argument("out"); m.add_argument("--targets", required=True)
-    m.add_argument("--per-class", type=int, default=3); m.add_argument("--seed", type=int, default=1)
+    m.add_argument("--mix", help='anchors per class (default "MAIN=3,FINDINGS=2,COLING=2,ARXIV-ONLY=2")')
+    m.add_argument("--seed", type=int, default=1)
     m.set_defaults(func=sample)
     args = ap.parse_args()
     args.func(args)

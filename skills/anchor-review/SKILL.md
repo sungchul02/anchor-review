@@ -1,142 +1,154 @@
 ---
 name: anchor-review
-description: Blind mock peer review of a manuscript for *ACL venues (ACL, EMNLP, NAACL via ARR), calibrated by mixing the manuscript with same-field "anchor" papers whose outcome is known (main conference, Findings, arXiv-only/not accepted). The first use for a venue and field builds and saves a calibrated profile; later reviews reuse it. Users who skip setup get the built-in default criteria. Use when the user asks for a mock review, a blind review, an ARR-style assessment, or "would this get into ACL/EMNLP/NAACL/Findings".
+description: Blind mock peer review of a manuscript for *ACL venues (ACL, EMNLP, NAACL via ARR). The manuscript is mixed into a 10-paper bundle with same-field "anchor" papers whose outcome is known (main conference, Findings, accepted at a less selective venue, arXiv-only). Three reviewers, one per venue tier (the target venue, a peer venue of the same level, a slightly easier venue), each review the whole bundle. Output is a ranking with scores and reasons, plus a detailed review of the manuscript. Phase 1 builds venue-tier criteria from real papers with known outcomes; phase 2 runs the blind review with them. Users can run the shipped defaults directly or customize venues, paper counts, tiers and bundle size in config. Use when the user asks for a mock review, a blind review, an ARR-style assessment, or "would this get into ACL/EMNLP/NAACL/Findings".
 ---
 
 # anchor-review
 
-The idea: absolute LLM review scores are unreliable, but their *ordering* is informative. So the target manuscript is
-reviewed blind together with papers whose fate is known. The result is reported as a position relative to those anchors.
+Absolute LLM review scores are unreliable, but rankings are informative. So the manuscript is read blind inside a bundle of papers whose fate is known, by reviewers set to different venue levels.
 
-## Choose the mode first
+## Default setup (what a run looks like)
 
-Run `python scripts/profiles.py list`. Profiles are saved in `~/.claude/anchor-review/profiles/`.
-
-| Situation | Mode |
+| Item | Default |
 |---|---|
-| A profile exists for the user's venue and field | **B. Review with the saved profile** (normal case) |
-| No profile, and the user agrees to the one-time setup | **A. Setup**, then B |
-| No profile, and the user does not want setup ("just review it", "use the default") | **C. Default** |
+| Bundle | **10 papers**: the target plus 9 anchors (3 MAIN, 2 FINDINGS, 2 COLING-accepted, 2 ARXIV-ONLY; 3/3/3 if there are no COLING anchors) |
+| Reviewers | **3, one per tier**, each reading **all 10 papers** in its own random order (`presets/tiers.json`) |
+| Tiers for target ACL | target: ACL · peer (same level): EMNLP · lower (slightly easier): COLING |
+| Scoring | every reviewer scores every paper; a paper's score is the **mean of the 3 reviewers**, and ranking and reading use that mean |
+| Output | (1) ranking table: rank, ID, class, mean score, each tier's score, decisive reasons; (2) target's rank against the saved profile; (3) a detailed review of the target |
 
-- If there is no profile, ask once: explain that setup collects about 24 anchors and runs about 15 reviewer subagents one time. After that, each review needs only about 6 reviewers.
-- If the user declines, use C and say that the result is uncalibrated for their field.
-- Never run setup without the user's agreement.
+Change the target venue with `--target-venue` (keys in `presets/tiers.json`; add your own). Change the bundle with `profiles.py sample --mix`.
 
-## A. Setup (once per venue × field)
+## Two phases
 
-**0. Criteria.**
-- For *ACL venues through ARR, use `reference/arr_criteria.md` and `reference/reviewer_prompt.md` as they are.
-- For another venue:
-  - research its official review form, score definitions, reviewer guidelines and CFP
-  - write a criteria file with sources
-  - adapt a copy of the reviewer prompt: its scales and its valid/invalid reasons
-  - keep the significance step, severity calibration and hiding rules
+1. **Build criteria (once per venue × field).**
+   - Read papers whose outcome is known, *with* their labels, and write one criteria file per reviewer tier. This is phase 1.
+2. **Blind review (each manuscript).**
+   - Mix the manuscript with anchors under hidden names.
+   - Every tier reviewer reads the whole bundle with its tier's criteria.
+   - Average the scores and analyze the result. This is phase 2.
 
-**1. Anchors.** Follow `reference/build_anchors.md`:
-- 8 MAIN, 8 FINDINGS and 8 ARXIV-ONLY papers in the user's topic
-- ARXIV-ONLY status verified (arXiv metadata, Semantic Scholar, OpenAlex, Anthology title match, web search)
-- a confidential `key.md`
+Settings live in `config/default.json`. A user copy at `~/.claude/anchor-review/config.json` overrides any key: target venue, field, papers per class for phase 1, bundle size and mix, tiers file, criteria folder and score bands.
 
-Optionally also build a held-out 4+4+4 set.
+## Choose the path first
 
-**2. Blind copies.** Use `scripts/extract.py`, `anon.py`, `clean.py` and `strip.py` (see "Blind copies" below).
+| Situation | Path |
+|---|---|
+| The user is fine with the defaults (ACL tiers × RAG field) | **Default:** use the shipped criteria `presets/criteria/acl-rag/`, then go to phase 2 |
+| The user wants another venue, field, paper counts, tiers or bundle size | **Custom:** edit the config, run phase 1, then phase 2 |
+| Saved criteria and a profile exist for that venue × field (`profiles.py list`) | Go straight to phase 2 |
 
-**3. Calibration run.**
-- Run `python scripts/assign.py <anchor_subs> <run> <prompt> --per 5 --seed 1`.
-- Launch one reviewer subagent per task (see "Reviewers" below).
-- Run `python scripts/aggregate.py <run>/reviews key.md --target NONE`.
-- **The reliability AUC (accepted vs arXiv-only) must be ≥ 0.75.** If it is lower, look for leaked cues before changing the prompt. A changed prompt is a new version and needs the held-out set.
+- Phase 1 costs about 4 analyst subagents plus 1 synthesis subagent, with about 40 papers read once.
+- Phase 2 costs one reviewer subagent per tier, each reading the whole bundle. The default is 3 reviewers × 10 papers.
+- Before running phase 1, state the cost and ask the user once.
 
-**4. Save.**
-```
-python scripts/profiles.py save <name> --venue "<venue>" --field "<field>" --subs <anchor_subs> --key key.md --reviews <run>/reviews [--prompt <prompt>]
-```
-- `<name>` is short, e.g. `acl-arr__rag`.
-- The profile stores the anchors, key, prompt, calibration reviews and the per-class score distribution.
-- It is local only. Never publish it, because it holds other people's paper texts.
+## Phase 1. Build criteria
 
-Then continue with B for the user's manuscript.
+1. **Anchors.**
+   - Collect papers per class as set in `criteria_building.anchors_per_class`. The default is 12 MAIN, 12 FINDINGS, 6 COLING and 12 ARXIV-ONLY, in the user's field.
+   - Follow `reference/build_anchors.md`, which includes verifying that ARXIV-ONLY papers have no publication record.
+   - Make anonymized copies with `extract.py`, `anon.py`, `clean.py` and `strip.py`.
+   - Write a confidential `key.md`.
+2. **Venue facts.**
+   - Each tier in `presets/tiers.json` needs a sourced acceptance rate and scale meaning.
+   - For a venue that is not listed, research its official review form, guidelines, CFP and acceptance rate, and add an entry.
+3. **Analysts, one per class.**
+   - Fill `reference/criteria_analyst_prompt.md` with {N}, {DIR} (that class's papers), {CLASS_DESC}, {FIELD} and {OUT}.
+   - Run one subagent per class. Each reads its papers with the outcome known and writes per-paper notes plus a "Common pattern" section with counts.
+4. **Synthesis.**
+   - Fill `reference/criteria_synthesis_prompt.md` with the analyses, `reference/arr_criteria.md`, the tiers file, the target key and the output folder.
+   - Run one subagent. It writes `tier_<tier>_<venue>.md` for each tier plus `README.md`.
+   - The files contain no paper titles or IDs.
+   - Check this with a search before use.
+5. **Profile (optional, for ranking against all anchors).**
+   - Run `profiles.py save` with the anchors, the key and any calibration reviews.
+   - Keep the profile local only, because it holds other people's papers.
 
-## B. Review with a saved profile
+## Phase 2. Blind review
 
-1. **Blind copy of the target** (see "Blind copies"). Give it a fresh 4-letter ID that is not in the profile key.
-2. **Sample anchors and the target into a new folder:**
+1. **Target copy.** Make the blind copy of the target with a fresh 4-letter ID (see "Blind copies").
+2. **Bundle.**
+   - With a profile, run `python scripts/profiles.py sample <name> <run>/subs --targets paper_ABCD.md --seed <n>`. This gives the default 9 anchors plus the target. Set `--mix` from `review.bundle_mix`.
+   - Without anchors (the shipped default criteria only), the bundle is the target alone.
+     - The scores are then read with the bands.
+     - There is no ranking.
+3. **Assign.**
    ```
-   python scripts/profiles.py sample <name> <run>/subs --targets paper_ABCD.md --per-class 3 --seed <n>
+   python scripts/assign.py <run>/subs <run> reference/reviewer_prompt.md --tiers presets/tiers.json --target-venue ACL --criteria-dir <criteria folder> --seed <n>
    ```
-   - This makes 9 anchors plus the target.
-   - Anchors stay in the batch so that reviewers judge the target in context. They also give a fresh reliability check.
-3. **Assign reviewers:** `python scripts/assign.py <run>/subs <run> ~/.claude/anchor-review/profiles/<name>/reviewer_prompt.md --per 5 --seed <n>`. With 10 papers this is 6 reviewers.
-4. **Run the reviewers** (see "Reviewers").
-5. **Aggregate:**
-   ```
-   python scripts/aggregate.py <run>/reviews ~/.claude/anchor-review/profiles/<name>/key.md --target ABCD --profile ~/.claude/anchor-review/profiles/<name>/profile.json
-   ```
-   - Report the target's rank and position **against the profile** (all calibrated anchors). This is the main result, e.g. "rank 7–14 of 37".
-   - Also report the position within this run, as a consistency check.
-   - **Always show the ranking table** that aggregate.py prints at the end. It has the columns 순위, ID, 구분, 평균 Overall, 심사자별 점수, Soundness and 결정 이유, with one line per reviewer. Put the target's row first in your summary, then the full table.
-
-## C. Default (no setup)
-
-Use the built-in criteria and score bands of `presets/acl-arr_rag.md`. They were calibrated for ARR × RAG/compression/multi-hop QA.
-1. Make the blind copy of the target.
-2. Put it alone in a folder and run `assign.py` with `reference/reviewer_prompt.md` and `--per 1`. This gives 3 reviewers.
-3. Read the mean Overall with the preset's bands:
-   - ≥ 3.0: accepted range
-   - 2.5–2.99: borderline
-   - < 2.5: likely not accepted as is
-4. Say clearly in the report:
-   - no anchors were used
-   - the bands come from another field's calibration
-   - setup (mode A) would give a calibrated position
+   This produces one task per tier, each covering the whole bundle, with that tier's criteria inserted.
+4. **Reviewers.** Run one subagent per task (see "Reviewers").
+5. **Aggregate.**
+   - Run `python scripts/aggregate.py <run>/reviews <key.md> --target ABCD [--profile <profile>/profile.json]`.
+   - Then run `python scripts/extract_target.py <run>/reviews ABCD <run>/target_reviews.md`.
+6. **Report, in this order:**
+   1. **The target's row:**
+      - its rank in the bundle
+      - its rank against the profile (e.g. "5–7 of 37")
+      - its mean score and each tier's score
+      
+      Read the scores with `review.score_bands`:
+      - ≥ 3.0: accepted range
+      - 2.5–2.99: borderline
+      - < 2.5: likely not accepted as is
+   2. **The full ranking table** (mean, each tier's score, each tier's reason).
+   3. **A detailed review of the target**, synthesized from `target_reviews.md`:
+      - summary
+      - significance per tier
+      - each central claim and its evidence verdict per tier
+      - strengths
+      - weaknesses (major or minor, with sections)
+      - the reviewers' questions
+      - what would raise the score
+      - where the tiers disagree
+   4. **Reliability:**
+      - the bundle AUC and the per-tier AUC lines
+      - any tier below 0.75 is weak in this run
+      - any anchor class that the tier misjudged, e.g. accepted COLING anchors scored as rejects by the COLING reviewer
+7. Save the report where the user keeps review notes.
 
 ## Blind copies (all modes)
-- Every paper must have the same Markdown form:
+- Every paper gets the same Markdown form:
   - `# Paper XXXX` / `## Title` / title / `## Abstract` / body
   - the appendix is kept and the references are dropped
+- Use `scripts/extract.py`, `anon.py`, `clean.py` and `strip.py`. Remove by hand the leftovers that `strip.py` flags.
 - Remove authors, affiliations, venue headers, acknowledgments, arXiv stamps and identifying URLs.
-- `strip.py` removes the Limitations, Ethics and AI-use sections, which leak the class. Remove by hand any leftovers it flags.
 - **Target paper.** Rename an identifying method name or self-citation consistently, e.g. "Author et al. (year)" → "prior work (year)". Replace placeholder markers with current values. Never change a claim.
-- Use a neutral folder name (e.g. `arr2027/subs/`). It must not reveal the purpose.
+- Use a neutral folder name, e.g. `arr2027/subs/`.
 
 ## Reviewers (all modes)
 - Launch one subagent per task file with only this brief: "Your reviewing assignment is in `<task file>`. Read that file first and follow it exactly. Do not open any other file except the submissions it lists. When done, reply with only the final summary table."
+- **Reviewers work paper by paper.** They append each paper's review to their file before opening the next paper, so a long bundle does not overflow their context.
 - **Do not tell reviewers:**
   - the purpose of the review
   - that a target paper is included
   - that some papers are published
   - any earlier scores
-- No web search. If a reviewer breaks a rule, discard that review and rerun the task.
-- Optional area chair: `reference/ac_prompt.md` (fill its placeholders by hand). Aggregate with `--ac <dir>`.
+- No web search. If a reviewer breaks a rule or skips papers, discard that review and rerun the task.
 
 ## What it can and cannot tell
-- The default profile (ARR × RAG, 36 anchors) separates **accepted vs arXiv-only**:
-  - AUC 0.84 on the tuning set
-  - AUC 0.89 on the held-out set
-  - AUC 0.86 on all 36
-- It **cannot** separate main from Findings: AUC 0.30–0.63. That split depends on area-chair quotas and reviewer noise (α≈0.3).
-- Report "accepted range or not" and the percentile against each anchor class. Never give a confident main/Findings verdict.
-- Write the report in the user's language. The reviews are in Korean by default; change the language line in the prompt if needed.
-
-## How many papers
-| Purpose | Anchors | Reviewer subagents (≈) |
-|---|---|---|
-| Setup, minimum | 5 + 5 + 5 | 9 |
-| Setup, recommended | 8 + 8 + 8 | 15 |
-| Setup with held-out validation | + 4 + 4 + 4 | +9 |
-| Each later review (mode B) | 3 + 3 + 3 sampled, plus the target | 6 |
-| Default (mode C) | none | 3 |
+- **Earlier calibration** (ARR × RAG, split batches of 5, 36 anchors):
+  - accepted vs arXiv-only: AUC 0.84 on tuning, 0.89 on held-out
+  - main vs Findings: not separable
+- **First run of the two-phase tiered protocol** (default criteria, 10-paper bundle, 3 tiers):
+  - bundle AUC accepted vs arXiv-only: 0.79
+  - per tier: EMNLP 0.96, COLING 0.68, ACL 0.64
+  - Known weakness: the COLING tier criteria came from only 6 papers. In that run they scored two real COLING-accepted anchors as rejects.
+  - Treat results from the COLING tier as provisional until its criteria are rebuilt from more papers.
+- Report "accepted range or not" and the rank. Never give a confident main/Findings verdict.
 
 ## Files
-- `reference/reviewer_prompt.md`: v2 reviewer prompt (frozen). It has the ARR scales, a significance step, severity calibration, and the valid and invalid reasons.
-- `reference/ac_prompt.md`: meta-review prompt.
-- `reference/arr_criteria.md`: sources for every rule.
-- `reference/build_anchors.md`: how to build and verify anchors.
-- `presets/acl-arr_rag.md`: default criteria and score bands (mode C), plus the calibration record.
-- `presets/domestic-kr.md`: Korean domestic venues (prompt only, uncalibrated).
-- `scripts/`: `extract.py`, `anon.py`, `clean.py`, `strip.py`, `assign.py`, `aggregate.py`, `profiles.py`. See `scripts/README.md`.
-- `~/.claude/anchor-review/profiles/<name>/`: saved profiles (local only).
+- `config/default.json`: all defaults (venue, field, papers per class, bundle, tiers, criteria folder, score bands). The user copy goes to `~/.claude/anchor-review/config.json`.
+- `presets/criteria/acl-rag/`: shipped phase-1 criteria for the ACL / EMNLP / COLING tiers in the RAG field. They contain no paper titles.
+- `presets/tiers.json`: reviewer tiers per target venue, with sourced acceptance rates.
+- `presets/acl-arr_rag.md`: score bands and the earlier calibration record.
+- `presets/domestic-kr.md`: Korean domestic venues (uncalibrated).
+- `reference/criteria_analyst_prompt.md` and `reference/criteria_synthesis_prompt.md`: the phase-1 prompts.
+- `reference/reviewer_prompt.md`: the phase-2 reviewer prompt (v3). It has slots for the venue note and the tier criteria, writes paper by paper, and keeps the ARR scales, the significance step, the severity calibration and the valid/invalid reasons.
+- `reference/reviewer_prompt_v2.md`: the version validated in the earlier split-batch runs.
+- `reference/ac_prompt.md`, `reference/arr_criteria.md`, `reference/build_anchors.md`.
+- `scripts/`: `extract.py`, `anon.py`, `clean.py`, `strip.py`, `assign.py`, `aggregate.py`, `extract_target.py`, `profiles.py`. See `scripts/README.md`.
 
-## Changing the prompt
-- Do not edit `reviewer_prompt.md` to make one manuscript look better.
-- Any change is a new version. Re-run setup steps 3–4 for it, and validate it on a held-out set.
+## Changing prompts, criteria or tier notes
+- Never edit a prompt, criteria file or tier note to make one manuscript look better.
+- Any change is a new version. Rebuild it from papers (phase 1), and check reliability on a bundle of anchors before relying on it.

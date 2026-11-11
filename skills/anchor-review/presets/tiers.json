@@ -1,0 +1,37 @@
+{
+  "_doc": "Reviewer tiers per target venue. One reviewer per tier reads the whole blind bundle. 'note' is inserted into the reviewer prompt as {VENUE_NOTE}. Edit or add targets freely; keep acceptance rates sourced (see reference/arr_criteria.md).",
+  "ACL": [
+    {
+      "tier": "target",
+      "venue": "ACL 2027 (via ACL Rolling Review)",
+      "note": "Flagship *ACL conference. Recent acceptance: about 19% to the main conference and about 18% to Findings (ACL 2026 front matter: 2,296 main and 2,163 Findings of 12,148 submissions). Overall 4 means the main conference, 3 means Findings."
+    },
+    {
+      "tier": "peer",
+      "venue": "EMNLP 2027 (via ACL Rolling Review)",
+      "note": "A top-tier *ACL conference at the same level as ACL, with an emphasis on empirical methods; recent calls ask for evidence beyond small benchmark gains (robustness, trustworthiness, actionable insight). Recent acceptance: about 15–22% main and about 14–17% Findings. Overall 4 means the main conference, 3 means Findings."
+    },
+    {
+      "tier": "lower",
+      "venue": "COLING 2027",
+      "note": "A well-established but slightly less selective computational-linguistics conference than ACL/EMNLP. Acceptance rate: about 30% (COLING 2025: 760 papers accepted, 30.1%, official front matter; long papers about 32%). It has no Findings track. Use the same scale with these meanings: 4 = accept to COLING; 3.5 = borderline accept; 3 = acceptable only if the pool is weak; 2.5 = weak reject; 2 or lower = reject. Judge against a typical COLING submission pool, not against ACL."
+    }
+  ],
+  "EMNLP": [
+    {
+      "tier": "target",
+      "venue": "EMNLP 2027 (via ACL Rolling Review)",
+      "note": "A top-tier *ACL conference at the same level as ACL, with an emphasis on empirical methods; recent calls ask for evidence beyond small benchmark gains (robustness, trustworthiness, actionable insight). Recent acceptance: about 15–22% main and about 14–17% Findings. Overall 4 means the main conference, 3 means Findings."
+    },
+    {
+      "tier": "peer",
+      "venue": "ACL 2027 (via ACL Rolling Review)",
+      "note": "Flagship *ACL conference. Recent acceptance: about 19% to the main conference and about 18% to Findings (ACL 2026 front matter: 2,296 main and 2,163 Findings of 12,148 submissions). Overall 4 means the main conference, 3 means Findings."
+    },
+    {
+      "tier": "lower",
+      "venue": "COLING 2027",
+      "note": "A well-established but slightly less selective computational-linguistics conference than ACL/EMNLP. Acceptance rate: about 30% (COLING 2025: 760 papers accepted, 30.1%, official front matter; long papers about 32%). It has no Findings track. Use the same scale with these meanings: 4 = accept to COLING; 3.5 = borderline accept; 3 = acceptable only if the pool is weak; 2.5 = weak reject; 2 or lower = reject. Judge against a typical COLING submission pool, not against ACL."
+    }
+  ]
+}

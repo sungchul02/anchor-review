@@ -17,8 +17,9 @@ paper.pdf ──extract.py──▶ paper.txt ──anon.py (+cfg.json)──▶
 | `anon.py` | `cfg.json` + texts | `paper_<ID>.md` | cut points per paper are set by hand in `cfg.json` |
 | `clean.py` | folder of `.md` | same files, in place | removes control characters |
 | `strip.py` | folder of `.md` | new folder | removes Limitations/Ethics/AI-use sections and flags leftovers |
-| `assign.py` | `subs/` + reviewer prompt | `tasks/`, `reviews/`, `plan.json` | one pass per venue, so 3 reviews per paper |
+| `assign.py` | `subs/` + reviewer prompt (+ `presets/tiers.json`) | `tasks/`, `reviews/`, `plan.json` | default: one reviewer per venue tier, each reading the whole bundle; `--per` gives the older split mode |
 | `aggregate.py` | `reviews/` + anchor key | printed report | parses only the last summary table of each review |
+| `extract_target.py` | `reviews/` + target ID | `target_reviews.md` | every reviewer's full section on the target, for the detailed report |
 | `profiles.py` | calibration run | `~/.claude/anchor-review/profiles/<name>/` | `save` once per venue × field; `sample` anchors + target for later reviews; `list` |
 
 The scripts use only the standard library, except `extract.py`, which needs PyMuPDF.

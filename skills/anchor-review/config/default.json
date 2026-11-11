@@ -1,0 +1,29 @@
+{
+  "_doc": "Default settings. Copy this file to ~/.claude/anchor-review/config.json and edit it to customize; any key you leave out falls back to this file. Every value here was chosen by the skill author for ACL × RAG and is only a starting point.",
+
+  "target_venue": "ACL",
+  "field": "retrieval-augmented generation, context compression, multi-hop QA, long-context robustness",
+
+  "criteria_building": {
+    "_doc": "Phase 1: analyze papers with known outcomes and write per-tier criteria. Classes are outcome groups; counts are how many papers to collect and analyze per class.",
+    "anchors_per_class": {"MAIN": 12, "FINDINGS": 12, "COLING": 6, "ARXIV-ONLY": 12},
+    "class_venues": {
+      "MAIN": "ACL / EMNLP / NAACL main conference, last 2 years",
+      "FINDINGS": "Findings of ACL / EMNLP / NAACL, last 2 years",
+      "COLING": "COLING main conference (accepted at the lower-tier venue)",
+      "ARXIV-ONLY": "arXiv preprints 14–30 months old with no publication record"
+    },
+    "criteria_dir": "presets/criteria/acl-rag",
+    "_criteria_dir_doc": "Shipped default criteria (ACL tiers x RAG field, built from 42 known-outcome papers). Write your own to ~/.claude/anchor-review/criteria/<name>/ and point here."
+  },
+
+  "review": {
+    "_doc": "Phase 2: one blind bundle; every reviewer reads every paper; a paper's score is the mean over reviewers.",
+    "bundle_size": 10,
+    "bundle_mix": {"MAIN": 3, "FINDINGS": 2, "COLING": 2, "ARXIV-ONLY": 2},
+    "tiers_file": "presets/tiers.json",
+    "reviewers": "one per tier in tiers_file[target_venue] (default: target ACL, peer EMNLP, lower COLING)",
+    "reviewer_prompt": "reference/reviewer_prompt.md",
+    "score_bands": {"accepted_range": 3.0, "borderline": 2.5}
+  }
+}

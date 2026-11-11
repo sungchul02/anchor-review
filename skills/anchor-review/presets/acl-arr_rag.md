@@ -8,8 +8,8 @@ Status: **calibrated and validated** (2026-11-12). This is the default preset.
 | Venues | ACL 2027, EMNLP 2027, NAACL 2027 (one reviewer pass per venue, so 3 reviews per paper) |
 | Criteria | `reference/arr_criteria.md` (ARR form, reviewer and AC guidelines, CFPs, acceptance rates) |
 | Reviewer prompt | `reference/reviewer_prompt.md` (v2, frozen) |
-| Tuning anchors | 24 papers: 8 MAIN (ACL'25, EMNLP'25, NAACL'25, ACL'26), 8 FINDINGS (same venues), 8 ARXIV-ONLY (posted 2024-08 to 2025-08). The paper list is not distributed. |
-| Held-out anchors | 12 papers, 4 per class, not used for tuning |
+| Tuning anchors | 24 papers: 8 MAIN (ACL'25, EMNLP'25, NAACL'25, ACL'26), 8 FINDINGS (same venues), 8 ARXIV-ONLY (posted 2024-08 to 2025-08). Key: `data/anchors_rag_acl_key.md` |
+| Held-out anchors | 12 papers, 4 per class, not used for tuning. Key: `data/anchors_rag_acl_holdout_key.md` |
 | Batch | 4–5 papers per reviewer |
 
 ## Results
@@ -57,5 +57,5 @@ The top-scoring anchors defined a new gap or phenomenon. Reviewers rated their s
 
 ## Using this preset for your own field
 - Keep the venue part (criteria and reviewer prompt) if you target *ACL.
-- Build your own anchors: 8/8/8 in your topic following `reference/build_anchors.md`, plus ideally 4/4/4 held out.
+- Replace the anchors: build 8/8/8 in your topic following `reference/build_anchors.md`, plus ideally 4/4/4 held out.
 - Re-check the AUC on your anchors before trusting the target's position.

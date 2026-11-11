@@ -27,8 +27,9 @@ import statistics as st
 import sys
 from itertools import combinations
 
-CLASSES = ("MAIN", "FINDINGS", "ARXIV-ONLY")
-RANK = {"MAIN": 2, "FINDINGS": 1, "ARXIV-ONLY": 0}
+CLASSES = ("MAIN", "FINDINGS", "COLING", "ARXIV-ONLY")   # COLING = accepted at the lower-tier venue
+RANK = {"MAIN": 2, "FINDINGS": 1, "ARXIV-ONLY": 0}         # ordering used by pairwise_order
+ACCEPTED = ("MAIN", "FINDINGS", "COLING")
 TARGET = "TARGET"
 
 
@@ -37,7 +38,7 @@ def read_key(path):
     """{paper_id: class} from the anchor key table."""
     key = {}
     for line in pathlib.Path(path).read_text(encoding="utf-8").splitlines():
-        m = re.match(r"\|\s*([A-Z]{4})\s*\|\s*(MAIN|FINDINGS|ARXIV-ONLY)\s*\|", line)
+        m = re.match(r"\|\s*([A-Z]{4})\s*\|\s*(MAIN|FINDINGS|COLING|ARXIV-ONLY)\s*\|", line)
         if m:
             key[m.group(1)] = m.group(2)
     return key
@@ -88,7 +89,7 @@ def column(row, name):
 
 def read_reviews(folder, known_ids):
     """{paper_id: [overall, ...]}, {paper_id: [soundness, ...]} over all review files."""
-    overall, soundness, reasons = {}, {}, {}
+    overall, soundness, reasons, by_reviewer = {}, {}, {}, {}
     for f in sorted(pathlib.Path(folder).glob("*.md")):
         rows = last_table(f.read_text(encoding="utf-8"), ("soundness", "overall"), known_ids)
         if not rows:
@@ -98,10 +99,12 @@ def read_reviews(folder, known_ids):
                 value = first_number(column(row, col))
                 if value is not None:
                     store.setdefault(pid, []).append(value)
+                    if col == "overall":
+                        by_reviewer.setdefault(f.stem, {})[pid] = value
             reason = column(row, "이유") or column(row, "reason")
             if reason:
                 reasons.setdefault(pid, []).append(f"[{f.stem}] {reason}")
-    return overall, soundness, reasons
+    return overall, soundness, reasons, by_reviewer
 
 
 def read_meta(folder, known_ids):
@@ -159,7 +162,7 @@ def class_means(scores, cls):
 def report(name, scores, cls, targets):
     print(f"== {name}")
     print("  class means (mean, n):", class_means(scores, cls))
-    print("  AUC accepted vs arXiv-only (reliability):", auc(scores, cls, ("MAIN", "FINDINGS"), ("ARXIV-ONLY",)))
+    print("  AUC accepted vs arXiv-only (reliability):", auc(scores, cls, ACCEPTED, ("ARXIV-ONLY",)))
     print("  AUC main vs Findings (not expected to work):", auc(scores, cls, ("MAIN",), ("FINDINGS",)))
     print("  pairwise order MAIN > FINDINGS > ARXIV-ONLY:", pairwise_order(scores, cls))
     for t in targets:
@@ -187,7 +190,15 @@ def report_against_profile(path, scores, targets):
         print(f"  target {t}: score {s}, rank {rank} of {len(pool) + 1}, share of each anchor class below it: {below}")
 
 
-def ranking_table(mean_overall, overall, soundness, reasons, cls):
+def report_reviewers(by_reviewer, cls):
+    """Each reviewer's own calibration on the anchors it scored (tiered runs: one line per venue tier)."""
+    print("== per reviewer")
+    for name, scores in sorted(by_reviewer.items()):
+        print(f"  {name}: AUC accepted vs arXiv-only {auc(scores, cls, ACCEPTED, ('ARXIV-ONLY',))},"
+              f" class means {class_means(scores, cls)}")
+
+
+def ranking_table(mean_overall, overall, soundness, reasons, cls, by_reviewer):
     """Markdown table: rank, ID, class, mean Overall, each reviewer's Overall, Soundness, decisive reasons."""
     order = sorted(mean_overall, key=lambda p: -mean_overall[p])
     lines = ["| 순위 | ID | 구분 | 평균 Overall | 심사자별 | Soundness | 결정 이유 |", "|---|---|---|---|---|---|---|"]
@@ -196,7 +207,8 @@ def ranking_table(mean_overall, overall, soundness, reasons, cls):
         label = "★ 대상 원고" if cls.get(p) == TARGET else cls.get(p, "?")
         sound = round(st.mean(soundness[p]), 2) if soundness.get(p) else "-"
         why = " / ".join(reasons.get(p, [])).replace("|", "/")
-        lines.append(f"| {rank} | {p} | {label} | {mean_overall[p]:.2f} | {overall[p]} | {sound} | {why} |")
+        each = " · ".join(f"{name} {s[p]}" for name, s in sorted(by_reviewer.items()) if p in s)
+        lines.append(f"| {rank} | {p} | {label} | {mean_overall[p]:.2f} | {each} | {sound} | {why} |")
     return "\n".join(lines)
 
 
@@ -215,7 +227,7 @@ def main():
     cls.update({t: TARGET for t in targets})
     known = set(cls)
 
-    overall, soundness, reasons = read_reviews(args.reviews, known)
+    overall, soundness, reasons, by_reviewer = read_reviews(args.reviews, known)
     mean_overall = {p: round(st.mean(v), 3) for p, v in overall.items()}
     report("reviewer mean Overall", mean_overall, cls, targets)
     if args.ac:
@@ -226,7 +238,9 @@ def main():
         report_against_profile(args.profile, mean_overall, targets)
     print("  reviews per paper:", sorted({len(v) for v in overall.values()}))
     print()
-    print(ranking_table(mean_overall, overall, soundness, reasons, cls))
+    report_reviewers(by_reviewer, cls)
+    print()
+    print(ranking_table(mean_overall, overall, soundness, reasons, cls, by_reviewer))
 
 
 if __name__ == "__main__":

@@ -12,38 +12,46 @@ mixes your manuscript **blind** with same-field papers whose fate is known, then
 
 The same run also measures how well the reviewers separated the anchors. Each result therefore comes with its own reliability check.
 
-| Default preset: ARR × RAG / context compression / multi-hop QA | Tuning set (24) | **Held-out set (12)** |
+| Earlier calibration: ARR × RAG / context compression / multi-hop QA | Tuning set (24) | **Held-out set (12)** |
 |---|---|---|
 | AUC: accepted (main+Findings) vs arXiv-only | 0.84 | **0.89** |
 | AUC: main vs Findings | 0.30 | 0.63 (n=4 vs 4) |
 
 It **can** tell whether a paper looks like it belongs in the accepted range. It **cannot** tell main from Findings. That split depends on area-chair quotas and reviewer noise more than on the text, and the skill says so in every report.
 
-## What it does
+## How it works
 
-1. **Venue criteria.** Uses the official ARR review form and guidelines, with sources:
-   - Soundness, Excitement and the 9-level Overall scale
-   - "Findings = sound and reproducible; main = plus novelty and impact"
-   - the reasons reviewers must not use, such as "not SOTA", "too simple" or "negative result"
-   
-   For other venues, it builds criteria from that venue's official form.
-2. **Anchors.** Collects 8 main, 8 Findings and 8 arXiv-only papers in your topic. The arXiv-only status is verified via arXiv metadata, Semantic Scholar, OpenAlex, an ACL Anthology title match and a web search.
-3. **Blind copies.** Converts every paper to the same Markdown format:
-   - removes authors, venue headers and acknowledgments
-   - removes Limitations, Ethics and AI-use sections, which leak the class
-   - renames your method if it is identifiable
-4. **Reviewers.** Three independent reviewer subagents per paper (ACL, EMNLP, NAACL). They follow the ARR scales, run a separate significance step, and grade flaws by severity. They are not told the purpose, that your paper is included, or that some papers are published.
-5. **Report.** Gives your mean score, its percentile against each anchor class, the reliability AUC of the run, and the recurring decisive reasons.
+**Phase 1: build criteria from real papers (once per venue × field).**
+- Claude collects papers with known outcomes in your field. The default is 12 main-conference, 12 Findings, 6 accepted at a slightly easier venue (COLING) and 12 arXiv-only.
+  - ARXIV-ONLY status is verified through arXiv, Semantic Scholar, OpenAlex, an Anthology match and a web search.
+- Analyst subagents read each class *with labels* and record what those papers have in common: contribution type and size, evidence breadth, and which flaws coexisted with acceptance.
+- A synthesis step turns this into one criteria file per reviewer tier. The files follow the official ARR scales and say which features earned which score at that venue. No paper titles are included.
 
-## Three modes
+**Phase 2: blind review (each manuscript).**
+- Your paper is mixed with anchors into a **10-paper bundle**: yours plus 3 main, 2 Findings, 2 COLING and 2 arXiv-only.
+  - Authors, venue marks and the Limitations, Ethics and AI-use sections are removed.
+  - Your method name can be renamed.
+- **Three reviewers, one per venue tier**, each read **all 10 papers** with their tier's criteria:
+  - the target venue (ACL)
+  - a peer venue at the same level (EMNLP)
+  - a slightly easier venue (COLING)
+- Each paper's score is the **mean of the three reviewers**.
+- The report gives:
+  - your rank
+  - the full ranking table with each tier's score and reason
+  - a detailed review of your paper: claims vs evidence, strengths, weaknesses by severity, questions, what would raise the score, and where the tiers disagree
+  - a reliability check: how well each tier separated the anchors
 
-| Mode | When | Cost |
-|---|---|---|
-| **Setup** (once per venue × field) | First use. Claude collects about 24 anchors in your field, runs a calibration review, and saves a local *profile* if the reliability AUC is ≥ 0.75 | about 15 reviewer subagents, once |
-| **Review with profile** | Every later review. Your paper is mixed with 9 anchors sampled from the profile and placed against all calibrated anchors | about 6 reviewer subagents |
-| **Default** | You skip setup. Three reviewers score your paper alone; the result is read with the built-in ARR × RAG score bands | 3 reviewer subagents, uncalibrated for your field |
+Reviewers never learn the purpose, that your paper is included, or that some papers are published. No web search is allowed.
 
-Profiles are stored in `~/.claude/anchor-review/profiles/` and never leave your machine, because they contain other people's papers.
+## Defaults vs custom
+
+| You want | Do |
+|---|---|
+| Just a review now | Use the shipped criteria (`presets/criteria/acl-rag/`, ACL tiers × RAG field) and go to phase 2 |
+| Another venue, field, paper counts, tiers, number of reviewers or bundle size | Copy `config/default.json` to `~/.claude/anchor-review/config.json`, edit it, run phase 1, then phase 2 |
+
+Approximate cost: phase 1 is about 5 subagents (4 analysts + 1 synthesis) reading about 40 papers once. Phase 2 is 3 reviewers × 10 papers.
 
 ## Install
 
@@ -66,13 +74,6 @@ Blind-review my draft against main/Findings/arXiv-only papers in machine transla
 
 For a new field, Claude builds the anchor set with `reference/build_anchors.md`.
 
-### How many papers
-| Purpose | Anchors | Reviews | Subagents (≈) |
-|---|---|---|---|
-| Minimum | 5 + 5 + 5 | 3 per paper | 9–10 |
-| Recommended | 8 + 8 + 8 | 3 per paper | 15 |
-| New venue or prompt | + held-out 4 + 4 + 4 | 3 per paper | +9 |
-
 ### Reading the score (default preset)
 | Mean Overall of 3 reviewers | Reading |
 |---|---|
@@ -86,17 +87,23 @@ Real ARR reviewers average about 3.2. These reviewers score lower, so read posit
 
 ```
 skills/anchor-review/
-  SKILL.md                       procedure Claude follows
-  reference/reviewer_prompt.md   v2 reviewer prompt (frozen)
-  reference/ac_prompt.md         area-chair meta-review prompt
-  reference/arr_criteria.md      every rule with its official source
-  reference/build_anchors.md     how to build and verify anchors
-  presets/acl-arr_rag.md         default preset: setup, results, score bands
-  presets/domestic-kr.md         Korean domestic venues (prompt only, uncalibrated)
-  scripts/                       extract, anonymize, strip, assign batches, aggregate
+  SKILL.md                              procedure Claude follows
+  config/default.json                   all defaults (copy to ~/.claude/anchor-review/config.json to customize)
+  presets/criteria/acl-rag/             shipped phase-1 criteria: ACL / EMNLP / COLING tiers, RAG field
+  presets/tiers.json                    reviewer tiers per target venue, with sourced acceptance rates
+  presets/acl-arr_rag.md                score bands and the earlier calibration record
+  presets/domestic-kr.md                Korean domestic venues (prompt only, uncalibrated)
+  reference/criteria_analyst_prompt.md  phase 1: per-class analysis of known-outcome papers
+  reference/criteria_synthesis_prompt.md phase 1: analyses -> per-tier criteria
+  reference/reviewer_prompt.md          phase 2 reviewer prompt (v3, tier note + criteria slots)
+  reference/arr_criteria.md             every ARR rule with its official source
+  reference/build_anchors.md            how to collect and verify anchors
+  scripts/                              extract, anonymize, strip, assign, aggregate, extract_target, profiles
 ```
 
 ## Limitations
+
+- **The tiered protocol has been checked once.** On a 10-paper bundle the AUC was 0.79 overall: EMNLP tier 0.96, ACL 0.64, COLING 0.68. The COLING criteria come from only 6 papers and were too strict, so treat that tier as provisional.
 
 - **Anchors are a small sample.** 36 papers, one field.
 - **"ARXIV-ONLY" means no publication record**, not a confirmed rejection.
