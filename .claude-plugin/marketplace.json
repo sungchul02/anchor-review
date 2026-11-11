@@ -1,0 +1,12 @@
+{
+  "name": "anchor-review",
+  "owner": { "name": "sungchul02" },
+  "plugins": [
+    {
+      "name": "anchor-review",
+      "source": "./",
+      "description": "Calibrated blind mock peer review for *ACL venues (ARR).",
+      "version": "0.1.0"
+    }
+  ]
+}
